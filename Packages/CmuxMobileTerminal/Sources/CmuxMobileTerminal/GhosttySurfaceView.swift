@@ -52,11 +52,15 @@ public protocol GhosttySurfaceViewDelegate: AnyObject {
     /// The Mac's libghostty self-gates: a normal screen treats it as a harmless
     /// empty selection. Optional.
     func ghosttySurfaceView(_ surfaceView: GhosttySurfaceView, didTapAtCol col: Int, row: Int)
+    /// The composer accessory button was tapped; the host should toggle the
+    /// iMessage-style composer above the terminal. Optional.
+    func ghosttySurfaceViewDidRequestComposerToggle(_ surfaceView: GhosttySurfaceView)
 }
 
 public extension GhosttySurfaceViewDelegate {
     func ghosttySurfaceView(_ surfaceView: GhosttySurfaceView, didScrollLines lines: Double, atCol col: Int, row: Int) {}
     func ghosttySurfaceView(_ surfaceView: GhosttySurfaceView, didTapAtCol col: Int, row: Int) {}
+    func ghosttySurfaceViewDidRequestComposerToggle(_ surfaceView: GhosttySurfaceView) {}
 }
 
 @MainActor
@@ -266,6 +270,9 @@ public enum TerminalInputAccessoryAction: Int, CaseIterable {
     case end
     case pageUp
     case pageDown
+    // Appended at the end so existing persisted raw values (user accessory bar
+    // order/enabled set) are preserved.
+    case composer
     var title: String {
         title(isMacRemote: false)
     }
@@ -283,6 +290,8 @@ public enum TerminalInputAccessoryAction: Int, CaseIterable {
         case .zoomOut:
             return ""
         case .zoomIn:
+            return ""
+        case .composer:
             return ""
         case .escape:
             return String(localized: "terminal.input_accessory.title.escape", defaultValue: "Esc")
@@ -337,6 +346,7 @@ public enum TerminalInputAccessoryAction: Int, CaseIterable {
         case .shift: return "terminal.inputAccessory.shift"
         case .zoomOut: return "terminal.inputAccessory.zoomOut"
         case .zoomIn: return "terminal.inputAccessory.zoomIn"
+        case .composer: return "terminal.inputAccessory.composer"
         case .escape: return "terminal.inputAccessory.escape"
         case .tab: return "terminal.inputAccessory.tab"
         case .upArrow: return "terminal.inputAccessory.up"
@@ -367,6 +377,8 @@ public enum TerminalInputAccessoryAction: Int, CaseIterable {
             return String(localized: "terminal.input_accessory.zoom_out", defaultValue: "Zoom Out")
         case .zoomIn:
             return String(localized: "terminal.input_accessory.zoom_in", defaultValue: "Zoom In")
+        case .composer:
+            return String(localized: "terminal.input_accessory.composer", defaultValue: "Composer")
         default:
             return nil
         }
@@ -378,6 +390,8 @@ public enum TerminalInputAccessoryAction: Int, CaseIterable {
             return "minus.magnifyingglass"
         case .zoomIn:
             return "plus.magnifyingglass"
+        case .composer:
+            return "square.and.pencil"
         default:
             return nil
         }
@@ -404,7 +418,7 @@ public enum TerminalInputAccessoryAction: Int, CaseIterable {
 
     var output: Data? {
         switch self {
-        case .control, .alternate, .command, .shift, .zoomOut, .zoomIn:
+        case .control, .alternate, .command, .shift, .zoomOut, .zoomIn, .composer:
             return nil
         case .escape:
             return Data([0x1B])
@@ -489,7 +503,7 @@ public enum TerminalInputAccessoryAction: Int, CaseIterable {
         case .end: return String(localized: "terminal.shortcut.name.end", defaultValue: "End")
         case .pageUp: return String(localized: "terminal.shortcut.name.pageUp", defaultValue: "Page Up")
         case .pageDown: return String(localized: "terminal.shortcut.name.pageDown", defaultValue: "Page Down")
-        case .control, .alternate, .command, .shift, .zoomIn, .zoomOut:
+        case .control, .alternate, .command, .shift, .zoomIn, .zoomOut, .composer:
             return title
         }
     }
@@ -767,6 +781,10 @@ public final class GhosttySurfaceView: UIView, TerminalSurfaceHosting {
         inputProxy.onZoom = { [weak self] direction in
             self?.performFontZoom(direction)
         }
+        inputProxy.onToggleComposer = { [weak self] in
+            guard let self else { return }
+            self.delegate?.ghosttySurfaceViewDidRequestComposerToggle(self)
+        }
         inputProxy.onHideKeyboard = { [weak self] in
             guard let self else { return }
             // Toggle: dismiss when the keyboard is up, bring it back when down.
@@ -1003,6 +1021,24 @@ public final class GhosttySurfaceView: UIView, TerminalSurfaceHosting {
         dockedToolbar = toolbar
         reservedToolbarHeight = Self.persistentToolbarHeight
         layoutDockedToolbar()
+    }
+
+    /// Hide or restore the docked accessory bar while the SwiftUI composer is
+    /// open. The composer owns the bottom edge (and the keyboard) when active, so
+    /// the docked bar would otherwise collide with it above the keyboard. Hiding
+    /// it and releasing its reserved grid height lets the composer sit flush
+    /// below the terminal grid.
+    public func setComposerActive(_ active: Bool) {
+        let reserved: CGFloat = active ? 0 : Self.persistentToolbarHeight
+        guard dockedToolbar?.isHidden != active || reservedToolbarHeight != reserved else { return }
+        dockedToolbar?.isHidden = active
+        reservedToolbarHeight = reserved
+        if active, inputProxy.isFirstResponder {
+            // Let the composer's text field own the keyboard.
+            inputProxy.resignFirstResponder()
+        }
+        setNeedsGeometrySync()
+        setNeedsLayout()
     }
 
     /// Full-width bar whose bottom sits on the keyboard (when up) or the very

@@ -16,6 +16,10 @@ struct GhosttySurfaceRepresentable: UIViewRepresentable {
     let surfaceID: String
     let store: CMUXMobileShellStore
     let fontSize: Float32
+    /// Whether the SwiftUI composer is open. When true the surface hides its
+    /// docked accessory bar and releases its reserved grid height so the composer
+    /// can own the bottom edge and the keyboard.
+    var isComposerActive: Bool = false
 
     func makeCoordinator() -> Coordinator {
         Coordinator(surfaceID: surfaceID, store: store)
@@ -43,7 +47,11 @@ struct GhosttySurfaceRepresentable: UIViewRepresentable {
     }
 
     func updateUIView(_ uiView: UIView, context: Context) {
-        // No prop-driven mutations yet; bytes flow via the byte sink.
+        // Bytes flow via the byte sink; the only prop-driven mutation is the
+        // composer's claim on the bottom edge + keyboard.
+        if let surfaceView = uiView as? GhosttySurfaceView {
+            surfaceView.setComposerActive(isComposerActive)
+        }
     }
 
     static func dismantleUIView(_ uiView: UIView, coordinator: Coordinator) {
@@ -138,6 +146,15 @@ struct GhosttySurfaceRepresentable: UIViewRepresentable {
             Task { @MainActor [weak self] in
                 guard let self else { return }
                 await self.store?.clickTerminal(surfaceID: self.surfaceID, col: col, row: row)
+            }
+        }
+
+        func ghosttySurfaceViewDidRequestComposerToggle(_ surfaceView: GhosttySurfaceView) {
+            // The composer button on the docked accessory bar was tapped. Flip the
+            // store flag; the terminal screen observes it and presents/dismisses
+            // the iMessage-style composer.
+            Task { @MainActor [weak store] in
+                store?.toggleComposer()
             }
         }
     }

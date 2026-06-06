@@ -8,6 +8,9 @@ final class TerminalInputTextView: UITextView {
     var onEscapeSequence: ((Data) -> Void)?
     var onZoom: ((TerminalFontZoomDirection) -> Void)?
     var onHideKeyboard: (() -> Void)?
+    /// Invoked when the composer accessory button is tapped. The host toggles
+    /// the iMessage-style composer above the terminal.
+    var onToggleComposer: (() -> Void)?
     var accessoryLayoutInsetsProvider: (() -> UIEdgeInsets)?
     /// The leftmost toolbar button. Toggles its glyph between dismiss-keyboard
     /// (when the keyboard is up) and show-keyboard (when down) via
@@ -192,7 +195,7 @@ final class TerminalInputTextView: UITextView {
     /// user-configurable shortcuts. Command is created but kept out of the
     /// stack until ``applyModifierPresentation()`` inserts it for a Mac remote.
     private static let pinnedLeadingActions: [TerminalInputAccessoryAction] = [
-        .control, .alternate, .command, .zoomOut, .zoomIn,
+        .composer, .control, .alternate, .command, .zoomOut, .zoomIn,
     ]
 
     /// Build (or rebuild) the bar's buttons: the pinned modifier/zoom controls
@@ -453,6 +456,11 @@ final class TerminalInputTextView: UITextView {
     }
 
     private func handleAccessoryAction(_ action: TerminalInputAccessoryAction) {
+        if action == .composer {
+            onToggleComposer?()
+            return
+        }
+
         if let zoomDirection = action.zoomDirection {
             disarmAllModifiers()
             refreshAccessoryButtonStyles()
